@@ -23,6 +23,8 @@ class Booking extends Model
         'admin_notes',
         'document_printed_at',
         'processed_by',
+        'passenger_count',
+        'driver_name',
     ];
 
     protected function casts(): array

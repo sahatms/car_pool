@@ -12,22 +12,30 @@ use App\Http\Controllers\Api\BookingApprovalController;
 Route::post('/login', [AuthController::class, 'login'])
     ->name('login');
 
+Route::post('/bookings', [BookingController::class, 'store']);
+
+Route::get('/vehicles', [VehicleController::class, 'index']);
+
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
-    Route::apiResource('vehicles', VehicleController::class);
+    Route::apiResource('vehicles', VehicleController::class)
+        ->except(['index']);
 
     Route::get('/borrowers', [BorrowerController::class, 'index']);
-    Route::post('/borrowers', [BorrowerController::class, 'store']);
     Route::get('/borrowers/{id}', [BorrowerController::class, 'show']);
 
     Route::get('/bookings', [BookingController::class, 'index']);
-    Route::post('/bookings', [BookingController::class, 'store']);
     Route::get('/bookings/{id}', [BookingController::class, 'show']);
 
     Route::patch(
         '/bookings/{id}/status',
         [BookingController::class, 'updateStatus']
+    );
+
+    Route::get(
+        '/bookings/{id}/pdf',
+        [BookingController::class, 'downloadPdf']
     );
 });
