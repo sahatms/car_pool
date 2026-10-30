@@ -145,7 +145,7 @@ class BookingController extends Controller
                 ]);
 
                 // Buat booking menggunakan ID peminjam yang baru dibuat.
-                return Booking::create([
+                $booking = Booking::create([
                     'booking_code' => 'BK-' . now()->format('YmdHis')
                         . '-' . Str::upper(Str::random(5)),
                     'borrower_id' => $borrower->id,
@@ -158,6 +158,12 @@ class BookingController extends Controller
                     'driver_name' => $validated['driver_name'],
                     'status' => 'pending',
                 ]);
+
+                $booking->download_token = Str::random(64);
+                $booking->save();
+
+                return $booking;
+
             });
         } catch (\Throwable $e) {
             // Hapus selfie jika transaksi database gagal.
@@ -166,9 +172,16 @@ class BookingController extends Controller
             throw $e;
         }
 
+        $bookingData = $booking->load(['borrower', 'vehicle'])
+            ->makeHidden(['download_token']);
+
         return response()->json([
             'message' => 'Pengajuan booking berhasil dibuat.',
-            'data' => $booking->load(['borrower', 'vehicle']),
+            'data' => $bookingData,
+            'download_url' => route('bookings.pdf', [
+                'id' => $booking->id,
+                'token' => $booking->download_token,
+            ]),
         ], 201);
     }
 
@@ -183,10 +196,12 @@ class BookingController extends Controller
         ]);
     }
 
-    public function downloadPdf(string $id)
+    public function downloadPdf(string $id, string $token)
     {
         $booking = Booking::with(['borrower', 'vehicle'])
-            ->findOrFail($id);
+            ->where('id', $id)
+            ->where('download_token', $token)
+            ->firstOrFail();
 
         $pdf = Pdf::loadView('pdf.model-c', [
             'booking' => $booking,
