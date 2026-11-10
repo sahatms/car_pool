@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use Throwable;
 use App\Http\Controllers\Controller;
 use App\Models\VehicleTaxRecord;
 use Illuminate\Http\Request;
@@ -160,21 +161,35 @@ class VehicleTaxRecordController extends Controller
             'notes' => ['sometimes', 'nullable', 'string'],
         ]);
 
-        if ($request->hasFile('payment_proof')) {
-            if ($record->payment_proof_path) {
-                Storage::disk('public')->delete(
-                    $record->payment_proof_path
-                );
+        $newProofPath = null;
+        $oldProofPath = $record->payment_proof_path;
+
+        try {
+            if ($request->hasFile('payment_proof')) {
+                $newProofPath = $request->file('payment_proof')
+                    ->store('vehicle-tax-proofs', 'public');
+
+                $validated['payment_proof_path'] = $newProofPath;
             }
 
-            $validated['payment_proof_path'] =
-                $request->file('payment_proof')
-                    ->store('vehicle-tax-proofs', 'public');
+            unset($validated['payment_proof']);
+
+            $record->update($validated);
+
+        } catch (Throwable $e) {
+            if ($newProofPath !== null) {
+                Storage::disk('public')->delete($newProofPath);
+            }
+
+            throw $e;
         }
 
-        unset($validated['payment_proof']);
-
-        $record->update($validated);
+        if (
+            $newProofPath !== null &&
+            $oldProofPath !== null
+        ) {
+            Storage::disk('public')->delete($oldProofPath);
+        }
 
         $data = $this->addReminderInformation(
             collect([$record->fresh()->load('vehicle')])

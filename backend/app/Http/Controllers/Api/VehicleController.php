@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Vehicle;
+use App\Models\Booking;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class VehicleController extends Controller
 {
@@ -39,14 +41,10 @@ class VehicleController extends Controller
                 'required',
                 Rule::in(['company_owned', 'rented', 'borrowed']),
             ],
-            'status' => [
-                'sometimes',
-                Rule::in(['active', 'inactive']),
-            ],
             'photo' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $validated['status'] = $validated['status'] ?? 'active';
+        $validated['status'] = 'active';
 
         $vehicle = Vehicle::create($validated);
 
@@ -96,6 +94,31 @@ class VehicleController extends Controller
             'photo' => ['nullable', 'string', 'max:255'],
         ]);
 
+        if (isset($validated['status'])) {
+
+            if ($vehicle->status === 'booked') {
+                throw ValidationException::withMessages([
+                    'status' => [
+                        'Status kendaraan tidak dapat diubah karena kendaraan sedang dipinjam.',
+                    ],
+                ]);
+            }
+
+            if ($validated['status'] === 'active') {
+                $maintenanceInProgress = $vehicle->maintenances()
+                    ->whereIn('status', ['scheduled', 'in_progress'])
+                    ->exists();
+
+                if ($maintenanceInProgress) {
+                    throw ValidationException::withMessages([
+                        'status' => [
+                            'Kendaraan tidak dapat diaktifkan karena masih memiliki jadwal atau proses maintenance.',
+                        ],
+                    ]);
+                }
+            }
+        }
+
         $vehicle->update($validated);
 
         return response()->json([
@@ -107,6 +130,26 @@ class VehicleController extends Controller
     public function destroy(string $id)
     {
         $vehicle = Vehicle::findOrFail($id);
+
+        $hasBookings = Booking::where('vehicle_id', $vehicle->id)
+            ->exists();
+
+        if ($hasBookings) {
+            throw ValidationException::withMessages([
+                'vehicle' => [
+                    'Kendaraan tidak dapat dihapus karena sudah memiliki riwayat booking.',
+                ],
+            ]);
+        }
+
+        if ($vehicle->maintenances()->exists()) {
+            throw ValidationException::withMessages([
+                'vehicle' => [
+                    'Kendaraan tidak dapat dihapus karena sudah memiliki riwayat maintenance.',
+                ],
+            ]);
+        }
+
         $vehicle->delete();
 
         return response()->json([

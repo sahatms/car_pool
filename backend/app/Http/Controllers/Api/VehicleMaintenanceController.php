@@ -4,9 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\VehicleMaintenance;
+use App\Models\Vehicle;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class VehicleMaintenanceController extends Controller
 {
@@ -77,17 +80,58 @@ class VehicleMaintenanceController extends Controller
             ],
         ]);
 
+        $validated['status'] = $validated['status'] ?? 'scheduled';
+
+        $receiptPath = null;
+
         if ($request->hasFile('receipt')) {
-            $validated['receipt_path'] = $request
-                ->file('receipt')
+            $receiptPath = $request->file('receipt')
                 ->store('vehicle-maintenance-receipts', 'public');
+
+            $validated['receipt_path'] = $receiptPath;
         }
 
         unset($validated['receipt']);
 
-        $validated['recorded_by'] = $request->user()->id;
+        try {
+            $maintenance = DB::transaction(function () use (
+                $validated,
+                $request
+            ) {
+                $vehicle = Vehicle::whereKey($validated['vehicle_id'])
+                    ->lockForUpdate()
+                    ->firstOrFail();
 
-        $maintenance = VehicleMaintenance::create($validated);
+                if ($vehicle->status === 'booked') {
+                    throw ValidationException::withMessages([
+                        'vehicle_id' => [
+                            'Maintenance tidak dapat dicatat karena kendaraan sedang dipinjam.',
+                        ],
+                    ]);
+                }
+
+                $validated['recorded_by'] = $request->user()->id;
+
+                $maintenance = VehicleMaintenance::create($validated);
+
+                if (in_array($validated['status'], [
+                    'scheduled',
+                    'in_progress',
+                ])) {
+                    $vehicle->update([
+                        'status' => 'inactive',
+                    ]);
+                }
+
+                return $maintenance;
+            });
+        } catch (\Throwable $e) {
+            if ($receiptPath !== null) {
+                Storage::disk('public')->delete($receiptPath);
+            }
+
+            throw $e;
+        }
 
         return response()->json([
             'message' => 'Data maintenance berhasil ditambahkan.',
@@ -160,25 +204,109 @@ class VehicleMaintenanceController extends Controller
             ],
         ]);
 
-        if ($request->hasFile('receipt')) {
-            if ($maintenance->receipt_path) {
-                Storage::disk('public')->delete(
-                    $maintenance->receipt_path
-                );
-            }
+        $oldReceiptPath = $maintenance->receipt_path;
+        $newReceiptPath = null;
 
-            $validated['receipt_path'] = $request
-                ->file('receipt')
+        if ($request->hasFile('receipt')) {
+            $newReceiptPath = $request->file('receipt')
                 ->store('vehicle-maintenance-receipts', 'public');
+
+            $validated['receipt_path'] = $newReceiptPath;
         }
 
         unset($validated['receipt']);
 
-        $maintenance->update($validated);
+        try {
+            $updatedMaintenance = DB::transaction(function () use (
+                $maintenance,
+                $validated
+            ) {
+                $maintenance = VehicleMaintenance::whereKey($maintenance->id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                $oldVehicleId = $maintenance->vehicle_id;
+                $newVehicleId = $validated['vehicle_id'] ?? $oldVehicleId;
+
+                $vehicles = Vehicle::whereIn(
+                    'id',
+                    array_unique([$oldVehicleId, $newVehicleId])
+                )
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->get()
+                    ->keyBy('id');
+
+                $oldVehicle = $vehicles->get($oldVehicleId);
+                $newVehicle = $vehicles->get($newVehicleId);
+
+                if (!$oldVehicle || !$newVehicle) {
+                    throw ValidationException::withMessages([
+                        'vehicle_id' => ['Kendaraan tidak ditemukan.'],
+                    ]);
+                }
+
+                $newStatus = $validated['status'] ?? $maintenance->status;
+
+                if (
+                    $newVehicleId !== $oldVehicleId &&
+                    in_array($newStatus, ['scheduled', 'in_progress']) &&
+                    $newVehicle->status === 'booked'
+                ) {
+                    throw ValidationException::withMessages([
+                        'vehicle_id' => [
+                            'Maintenance tidak dapat dipindahkan ke kendaraan yang sedang dipinjam.',
+                        ],
+                    ]);
+                }
+
+                $maintenance->update($validated);
+
+                foreach ($vehicles as $vehicle) {
+                    $hasActiveMaintenance = VehicleMaintenance::where(
+                        'vehicle_id',
+                        $vehicle->id
+                    )
+                        ->whereIn('status', ['scheduled', 'in_progress'])
+                        ->exists();
+
+                    if ($vehicle->status === 'booked') {
+                        continue;
+                    }
+
+                    $vehicle->update([
+                        'status' => $hasActiveMaintenance
+                            ? 'inactive'
+                            : (
+                                $vehicle->status === 'inactive' &&
+                                $vehicle->id === $oldVehicleId &&
+                                !in_array($newStatus, ['completed', 'cancelled'])
+                                    ? 'inactive'
+                                    : 'active'
+                            ),
+                    ]);
+                }
+
+                return $maintenance->fresh()->load('vehicle');
+            });
+        } catch (\Throwable $e) {
+            if ($newReceiptPath !== null) {
+                Storage::disk('public')->delete($newReceiptPath);
+            }
+
+            throw $e;
+        }
+
+        if (
+            $newReceiptPath !== null &&
+            $oldReceiptPath !== null
+        ) {
+            Storage::disk('public')->delete($oldReceiptPath);
+        }
 
         return response()->json([
             'message' => 'Data maintenance berhasil diperbarui.',
-            'data' => $maintenance->fresh()->load('vehicle'),
+            'data' => $updatedMaintenance,
         ]);
     }
 
@@ -186,13 +314,39 @@ class VehicleMaintenanceController extends Controller
     {
         $maintenance = VehicleMaintenance::findOrFail($id);
 
-        if ($maintenance->receipt_path) {
-            Storage::disk('public')->delete(
-                $maintenance->receipt_path
-            );
-        }
+        $receiptPath = $maintenance->receipt_path;
 
-        $maintenance->delete();
+        DB::transaction(function () use ($maintenance) {
+
+            $maintenance = VehicleMaintenance::whereKey($maintenance->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $vehicle = Vehicle::whereKey($maintenance->vehicle_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $maintenance->delete();
+
+            $hasActiveMaintenance = VehicleMaintenance::where(
+                'vehicle_id',
+                $vehicle->id
+            )
+                ->whereIn('status', ['scheduled', 'in_progress'])
+                ->exists();
+
+            if ($vehicle->status !== 'booked') {
+                $vehicle->update([
+                    'status' => $hasActiveMaintenance
+                        ? 'inactive'
+                        : 'active',
+                ]);
+            }
+        });
+
+        if ($receiptPath !== null) {
+            Storage::disk('public')->delete($receiptPath);
+        }
 
         return response()->json([
             'message' => 'Data maintenance berhasil dihapus.',

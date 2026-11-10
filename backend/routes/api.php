@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\VehicleTaxRecordController;
 use App\Http\Controllers\Api\VehicleMaintenanceController;
 use App\Http\Controllers\Api\VehicleUsageController;
 use App\Http\Controllers\Api\VehicleReturnController;
+use App\Http\Controllers\Api\FuelTransactionController;
 
 Route::post('/login', [AuthController::class, 'login'])
     ->name('login');
@@ -61,5 +62,30 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post(
         '/vehicle-usages/{id}/return',
         [VehicleReturnController::class, 'store']
+    );
+
+    Route::get(
+        '/fuel-transactions',
+        [FuelTransactionController::class, 'index']
+    );
+
+    Route::post(
+        '/fuel-transactions',
+        [FuelTransactionController::class, 'store']
+    );
+
+    Route::get(
+        '/fuel-transactions/{id}',
+        [FuelTransactionController::class, 'show']
+    );
+
+    Route::put(
+        '/fuel-transactions/{id}',
+        [FuelTransactionController::class, 'update']
+    );
+
+    Route::delete(
+        '/fuel-transactions/{id}',
+        [FuelTransactionController::class, 'destroy']
     );
 });

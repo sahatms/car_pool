@@ -6,14 +6,18 @@ use App\Http\Controllers\Controller;
 use App\Models\VehicleUsage;
 use App\Models\VehicleReturn;
 use App\Models\Booking;
+use App\Services\VehicleOdometerService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class VehicleReturnController extends Controller
 {
-    public function store(Request $request, string $id)
-    {
+    public function store(
+        Request $request,
+        string $id,
+        VehicleOdometerService $odometerService
+    ) {
         $validated = $request->validate([
             'actual_return_datetime' => ['required', 'date'],
             'odometer_end' => ['required', 'integer', 'min:0'],
@@ -21,7 +25,12 @@ class VehicleReturnController extends Controller
             'return_notes' => ['nullable', 'string'],
         ]);
 
-        $vehicleReturn = DB::transaction(function () use ($validated, $id, $request) {
+        $vehicleReturn = DB::transaction(function () use (
+            $validated,
+            $id,
+            $request,
+            $odometerService
+        ) {
 
             $usage = VehicleUsage::whereKey($id)
                 ->lockForUpdate()
@@ -31,10 +40,10 @@ class VehicleReturnController extends Controller
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            if ($booking->status !== 'approved') {
+            if ($booking->status !== 'pending') {
                 throw ValidationException::withMessages([
                     'booking' => [
-                        'Pengembalian hanya dapat dicatat untuk booking yang berstatus approved.',
+                        'Pengembalian hanya dapat dicatat untuk booking yang masih pending.',
                     ],
                 ]);
             }
@@ -58,10 +67,22 @@ class VehicleReturnController extends Controller
                 ]);
             }
 
-            if ($validated['odometer_end'] < $usage->odometer_start) {
+            $vehicle = $booking->vehicle()
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $latestOdometer = $odometerService->getLatestOdometer($vehicle);
+
+            if (
+                $validated['odometer_end'] < $usage->odometer_start ||
+                (
+                    $latestOdometer !== null &&
+                    $validated['odometer_end'] < $latestOdometer
+                )
+            ) {
                 throw ValidationException::withMessages([
                     'odometer_end' => [
-                        'Kilometer akhir tidak boleh lebih kecil daripada kilometer awal.',
+                        "Kilometer akhir tidak boleh lebih kecil dari kilometer awal maupun catatan odometer terakhir ({$latestOdometer} km).",
                     ],
                 ]);
             }
@@ -90,6 +111,19 @@ class VehicleReturnController extends Controller
             // Otomatis menyelesaikan booking setelah kendaraan dikembalikan.
             $booking->update([
                 'status' => 'completed',
+            ]);
+
+            $maintenanceInProgress = $vehicle->maintenances()
+                ->whereIn('status', ['scheduled', 'in_progress'])
+                ->exists();
+
+            // Kendaraan tidak aktif jika masih dalam perawatan
+            // atau kondisinya tidak baik.
+            $vehicle->update([
+                'status' => (
+                    $maintenanceInProgress ||
+                    mb_strtolower(trim($validated['vehicle_condition'])) !== 'baik'
+                ) ? 'inactive' : 'active',
             ]);
 
             return $vehicleReturn;

@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Booking;
+use App\Models\Vehicle;
 use App\Models\VehicleUsage;
+use App\Services\VehicleOdometerService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -12,7 +14,11 @@ use Carbon\Carbon;
 
 class VehicleUsageController extends Controller
 {
-    public function store(Request $request, string $id)
+    public function store(
+    Request $request,
+    string $id,
+    VehicleOdometerService $odometerService
+    )
     {
         $validated = $request->validate([
             'actual_start_datetime' => ['required', 'date'],
@@ -26,10 +32,27 @@ class VehicleUsageController extends Controller
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            if ($booking->status !== 'approved') {
+            if ($booking->status !== 'pending') {
                 throw ValidationException::withMessages([
                     'booking' => [
-                        'Penggunaan kendaraan hanya dapat dicatat untuk booking yang sudah disetujui.',
+                        'Penggunaan kendaraan hanya dapat dicatat untuk booking yang masih pending dan belum ditolak.',
+                    ],
+                ]);
+            }
+
+            $vehicle = Vehicle::whereKey($booking->vehicle_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $latestOdometer = $odometerService->getLatestOdometer($vehicle);
+
+            if (
+                $latestOdometer !== null &&
+                $validated['odometer_start'] < $latestOdometer
+            ) {
+                throw ValidationException::withMessages([
+                    'odometer_start' => [
+                        "Odometer awal tidak boleh lebih kecil dari catatan terakhir ({$latestOdometer} km).",
                     ],
                 ]);
             }

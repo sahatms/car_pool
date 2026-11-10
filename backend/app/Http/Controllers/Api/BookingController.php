@@ -36,12 +36,12 @@ class BookingController extends Controller
             'employee_number' => ['nullable', 'string', 'max:50'],
             'department' => ['required', 'string', 'max:100'],
             'phone_number' => ['required', 'string', 'max:20'],
-            'selfie' => [
-                'required',
-                'image',
-                'mimes:jpg,jpeg,png,webp',
-                'max:2048',
-            ],
+            //'selfie' => [
+            //    'required',
+            //    'image',
+            //    'mimes:jpg,jpeg,png,webp',
+            //    'max:2048',
+            //],
 
             // Data booking
             'vehicle_id' => [
@@ -66,8 +66,12 @@ class BookingController extends Controller
         ]);
 
         // Simpan selfie ke storage Laravel.
-        $selfiePath = $request->file('selfie')
-            ->store('borrowers/selfies', 'public');
+        $selfiePath = null;
+
+        if ($request->hasFile('selfie')) {
+            $selfiePath = $request->file('selfie')
+                ->store('borrowers/selfies', 'public');
+        }
 
         try {
             $booking = DB::transaction(function () use (
@@ -158,6 +162,11 @@ class BookingController extends Controller
                     'driver_name' => $validated['driver_name'],
                     'status' => 'pending',
                 ]);
+                
+                // Kunci kendaraan setelah booking berhasil dibuat.
+                $vehicle->update([
+                    'status' => 'booked',
+                ]);
 
                 $booking->download_token = Str::random(64);
                 $booking->save();
@@ -166,8 +175,10 @@ class BookingController extends Controller
 
             });
         } catch (\Throwable $e) {
-            // Hapus selfie jika transaksi database gagal.
-            Storage::disk('public')->delete($selfiePath);
+            // Hapus selfie hanya jika file memang berhasil disimpan.
+            if ($selfiePath !== null) {
+                Storage::disk('public')->delete($selfiePath);
+            }
 
             throw $e;
         }
@@ -215,37 +226,47 @@ class BookingController extends Controller
     public function updateStatus(Request $request, string $id)
     {
         $validated = $request->validate([
-            'status' => ['required', 'in:approved,rejected'],
+            'status' => ['required', 'in:rejected'],
             'admin_notes' => ['nullable', 'string', 'max:1000'],
         ]);
 
         $booking = DB::transaction(function () use ($id, $validated, $request) {
-        $booking = Booking::whereKey($id)
+            $booking = Booking::whereKey($id)
                 ->lockForUpdate()
                 ->firstOrFail();
 
             if ($booking->status !== 'pending') {
                 throw ValidationException::withMessages([
                     'status' => [
-                    'Hanya peminjaman berstatus pending yang dapat diproses.'
+                        'Hanya booking pending yang dapat ditolak.',
                     ],
                 ]);
             }
 
+            $vehicle = Vehicle::whereKey($booking->vehicle_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
             $booking->update([
-                'status' => $validated['status'],
+                'status' => 'rejected',
                 'admin_notes' => $validated['admin_notes'] ?? null,
                 'processed_by' => $request->user()->id,
             ]);
 
-        return $booking;
-    });
+            $maintenanceInProgress = $vehicle->maintenances()
+                ->whereIn('status', ['scheduled', 'in_progress'])
+                ->exists();
 
-    return response()->json([
-        'message' => $validated['status'] === 'approved'
-            ? 'Peminjaman berhasil disetujui.'
-            : 'Peminjaman berhasil ditolak.',
-        'data' => $booking->fresh()->load(['borrower', 'vehicle']),
-    ]);
+            $vehicle->update([
+                'status' => $maintenanceInProgress ? 'inactive' : 'active',
+            ]);
+
+            return $booking;
+        });
+
+        return response()->json([
+            'message' => 'Pengajuan peminjaman berhasil ditolak.',
+            'data' => $booking->fresh()->load(['borrower', 'vehicle']),
+        ]);
     }
 }

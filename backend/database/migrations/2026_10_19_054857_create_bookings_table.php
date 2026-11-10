@@ -30,13 +30,13 @@ return new class extends Migration
         $table->string('destination');
         $table->text('purpose');
 
-        $table->enum('status', [
-            'pending',
-            'approved',
-            'rejected',
-            'cancelled',
-            'completed',
-        ])->default('pending');
+            $table->enum('status', [
+                'pending',
+                'approved',
+                'rejected',
+                'cancelled',
+                'completed',
+            ])->default('pending');
 
         $table->text('admin_notes')->nullable();
         $table->timestamp('document_printed_at')->nullable();
