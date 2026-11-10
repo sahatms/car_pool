@@ -8,6 +8,11 @@ use App\Http\Controllers\Api\VehicleController;
 use App\Http\Controllers\Api\BorrowerController;
 use App\Http\Controllers\Api\BookingController;
 use App\Http\Controllers\Api\BookingApprovalController;
+use App\Http\Controllers\Api\VehicleTaxRecordController;
+use App\Http\Controllers\Api\VehicleMaintenanceController;
+use App\Http\Controllers\Api\VehicleUsageController;
+use App\Http\Controllers\Api\VehicleReturnController;
+use App\Http\Controllers\Api\FuelTransactionController;
 
 Route::post('/login', [AuthController::class, 'login'])
     ->name('login');
@@ -15,6 +20,11 @@ Route::post('/login', [AuthController::class, 'login'])
 Route::post('/bookings', [BookingController::class, 'store']);
 
 Route::get('/vehicles', [VehicleController::class, 'index']);
+
+Route::get(
+    '/bookings/{id}/pdf/{token}',
+    [BookingController::class, 'downloadPdf']
+)->name('bookings.pdf');
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', [AuthController::class, 'me']);
@@ -34,8 +44,48 @@ Route::middleware('auth:sanctum')->group(function () {
         [BookingController::class, 'updateStatus']
     );
 
+    Route::apiResource(
+        'vehicle-tax-records',
+        VehicleTaxRecordController::class
+    );
+
+    Route::apiResource(
+        'vehicle-maintenances',
+        VehicleMaintenanceController::class
+    );
+
+    Route::post(
+        '/bookings/{id}/usage',
+        [VehicleUsageController::class, 'store']
+    );
+
+    Route::post(
+        '/vehicle-usages/{id}/return',
+        [VehicleReturnController::class, 'store']
+    );
+
     Route::get(
-        '/bookings/{id}/pdf',
-        [BookingController::class, 'downloadPdf']
+        '/fuel-transactions',
+        [FuelTransactionController::class, 'index']
+    );
+
+    Route::post(
+        '/fuel-transactions',
+        [FuelTransactionController::class, 'store']
+    );
+
+    Route::get(
+        '/fuel-transactions/{id}',
+        [FuelTransactionController::class, 'show']
+    );
+
+    Route::put(
+        '/fuel-transactions/{id}',
+        [FuelTransactionController::class, 'update']
+    );
+
+    Route::delete(
+        '/fuel-transactions/{id}',
+        [FuelTransactionController::class, 'destroy']
     );
 });

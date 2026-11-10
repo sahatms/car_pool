@@ -21,6 +21,13 @@ class Vehicle extends Model
         'photo',
     ];
 
+    protected function casts(): array
+    {
+        return [
+            'deleted_at' => 'datetime',
+        ];
+    }
+
     public function bookings(): HasMany
     {
         return $this->hasMany(Booking::class);

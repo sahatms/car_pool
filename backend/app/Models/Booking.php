@@ -11,6 +11,10 @@ class Booking extends Model
 {
     use SoftDeletes;
 
+    protected $hidden = [
+        'download_token',
+    ];
+
     protected $fillable = [
         'booking_code',
         'borrower_id',
