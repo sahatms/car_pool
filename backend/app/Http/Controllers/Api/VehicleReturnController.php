@@ -117,13 +117,27 @@ class VehicleReturnController extends Controller
                 ->whereIn('status', ['scheduled', 'in_progress'])
                 ->exists();
 
-            // Kendaraan tidak aktif jika masih dalam perawatan
-            // atau kondisinya tidak baik.
+            $otherActiveBooking = Booking::where('vehicle_id', $vehicle->id)
+                ->whereIn('status', ['pending', 'approved'])
+                ->exists();
+
+            $vehicleCondition = mb_strtolower(
+                trim($validated['vehicle_condition'])
+            );
+
+            if (
+                $maintenanceInProgress ||
+                $vehicleCondition !== 'baik'
+            ) {
+                $vehicleStatus = 'inactive';
+            } elseif ($otherActiveBooking) {
+                $vehicleStatus = 'booked';
+            } else {
+                $vehicleStatus = 'active';
+            }
+
             $vehicle->update([
-                'status' => (
-                    $maintenanceInProgress ||
-                    mb_strtolower(trim($validated['vehicle_condition'])) !== 'baik'
-                ) ? 'inactive' : 'active',
+                'status' => $vehicleStatus,
             ]);
 
             return $vehicleReturn;

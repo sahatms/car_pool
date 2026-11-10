@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\VehicleMaintenance;
 use App\Models\Vehicle;
+use App\Models\Booking;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
@@ -102,26 +103,54 @@ class VehicleMaintenanceController extends Controller
                     ->lockForUpdate()
                     ->firstOrFail();
 
-                if ($vehicle->status === 'booked') {
-                    throw ValidationException::withMessages([
-                        'vehicle_id' => [
-                            'Maintenance tidak dapat dicatat karena kendaraan sedang dipinjam.',
-                        ],
-                    ]);
+                if (in_array($validated['status'], ['scheduled', 'in_progress'])) {
+                    $maintenanceStart = $validated['start_date'];
+                    $maintenanceEnd = $validated['end_date'] ?? '9999-12-31';
+
+                    $hasBookingConflict = Booking::where(
+                        'vehicle_id',
+                        $vehicle->id
+                    )
+                        ->whereIn('status', ['pending', 'approved'])
+                        ->whereDate('start_datetime', '<=', $maintenanceEnd)
+                        ->whereDate('end_datetime', '>=', $maintenanceStart)
+                        ->exists();
+
+                    if ($hasBookingConflict) {
+                        throw ValidationException::withMessages([
+                            'start_date' => [
+                                'Jadwal maintenance bertabrakan dengan jadwal booking kendaraan.',
+                            ],
+                        ]);
+                    }
                 }
 
                 $validated['recorded_by'] = $request->user()->id;
 
                 $maintenance = VehicleMaintenance::create($validated);
 
-                if (in_array($validated['status'], [
-                    'scheduled',
-                    'in_progress',
-                ])) {
-                    $vehicle->update([
-                        'status' => 'inactive',
-                    ]);
+                $hasActiveMaintenance = VehicleMaintenance::where(
+                    'vehicle_id',
+                    $vehicle->id
+                )
+                    ->whereIn('status', ['scheduled', 'in_progress'])
+                    ->exists();
+
+                $hasActiveBooking = Booking::where('vehicle_id', $vehicle->id)
+                    ->whereIn('status', ['pending', 'approved'])
+                    ->exists();
+
+                if ($hasActiveMaintenance) {
+                    $vehicleStatus = 'inactive';
+                } elseif ($hasActiveBooking) {
+                    $vehicleStatus = 'booked';
+                } else {
+                    $vehicleStatus = 'active';
                 }
+
+                $vehicle->update([
+                    'status' => $vehicleStatus,
+                ]);
 
                 return $maintenance;
             });
@@ -248,16 +277,32 @@ class VehicleMaintenanceController extends Controller
 
                 $newStatus = $validated['status'] ?? $maintenance->status;
 
-                if (
-                    $newVehicleId !== $oldVehicleId &&
-                    in_array($newStatus, ['scheduled', 'in_progress']) &&
-                    $newVehicle->status === 'booked'
-                ) {
-                    throw ValidationException::withMessages([
-                        'vehicle_id' => [
-                            'Maintenance tidak dapat dipindahkan ke kendaraan yang sedang dipinjam.',
-                        ],
-                    ]);
+                if (in_array($newStatus, ['scheduled', 'in_progress'])) {
+                    $maintenanceStart = $validated['start_date']
+                        ?? $maintenance->start_date->format('Y-m-d');
+
+                    $maintenanceEnd = array_key_exists('end_date', $validated)
+                        ? ($validated['end_date'] ?? '9999-12-31')
+                        : ($maintenance->end_date
+                            ? $maintenance->end_date->format('Y-m-d')
+                            : '9999-12-31');
+
+                    $hasBookingConflict = Booking::where(
+                        'vehicle_id',
+                        $newVehicleId
+                    )
+                        ->whereIn('status', ['pending', 'approved'])
+                        ->whereDate('start_datetime', '<=', $maintenanceEnd)
+                        ->whereDate('end_datetime', '>=', $maintenanceStart)
+                        ->exists();
+
+                    if ($hasBookingConflict) {
+                        throw ValidationException::withMessages([
+                            'start_date' => [
+                                'Jadwal maintenance bertabrakan dengan jadwal booking kendaraan.',
+                            ],
+                        ]);
+                    }
                 }
 
                 $maintenance->update($validated);
@@ -270,20 +315,20 @@ class VehicleMaintenanceController extends Controller
                         ->whereIn('status', ['scheduled', 'in_progress'])
                         ->exists();
 
-                    if ($vehicle->status === 'booked') {
-                        continue;
+                    $hasActiveBooking = Booking::where('vehicle_id', $vehicle->id)
+                        ->whereIn('status', ['pending', 'approved'])
+                        ->exists();
+
+                    if ($hasActiveMaintenance) {
+                        $vehicleStatus = 'inactive';
+                    } elseif ($hasActiveBooking) {
+                        $vehicleStatus = 'booked';
+                    } else {
+                        $vehicleStatus = 'active';
                     }
 
                     $vehicle->update([
-                        'status' => $hasActiveMaintenance
-                            ? 'inactive'
-                            : (
-                                $vehicle->status === 'inactive' &&
-                                $vehicle->id === $oldVehicleId &&
-                                !in_array($newStatus, ['completed', 'cancelled'])
-                                    ? 'inactive'
-                                    : 'active'
-                            ),
+                        'status' => $vehicleStatus,
                     ]);
                 }
 
@@ -335,13 +380,21 @@ class VehicleMaintenanceController extends Controller
                 ->whereIn('status', ['scheduled', 'in_progress'])
                 ->exists();
 
-            if ($vehicle->status !== 'booked') {
-                $vehicle->update([
-                    'status' => $hasActiveMaintenance
-                        ? 'inactive'
-                        : 'active',
-                ]);
+            $hasActiveBooking = Booking::where('vehicle_id', $vehicle->id)
+                ->whereIn('status', ['pending', 'approved'])
+                ->exists();
+
+            if ($hasActiveMaintenance) {
+                $vehicleStatus = 'inactive';
+            } elseif ($hasActiveBooking) {
+                $vehicleStatus = 'booked';
+            } else {
+                $vehicleStatus = 'active';
             }
+
+            $vehicle->update([
+                'status' => $vehicleStatus,
+            ]);
         });
 
         if ($receiptPath !== null) {

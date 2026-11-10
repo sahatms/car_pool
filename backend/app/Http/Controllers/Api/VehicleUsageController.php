@@ -26,7 +26,12 @@ class VehicleUsageController extends Controller
             'usage_notes' => ['nullable', 'string'],
         ]);
 
-        $usage = DB::transaction(function () use ($validated, $id, $request) {
+        $usage = DB::transaction(function () use (
+            $validated,
+            $id,
+            $request,
+            $odometerService
+        ) {
 
             $booking = Booking::whereKey($id)
                 ->lockForUpdate()
