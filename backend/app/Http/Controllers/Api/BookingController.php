@@ -82,10 +82,10 @@ class BookingController extends Controller
                     ->lockForUpdate()
                     ->firstOrFail();
 
-                if ($vehicle->status !== 'active') {
+                if ($vehicle->status === 'inactive') {
                     throw ValidationException::withMessages([
                         'vehicle_id' => [
-                            'Kendaraan tidak aktif dan tidak dapat dipinjam.',
+                            'Kendaraan sedang tidak aktif dan tidak dapat dipinjam.',
                         ],
                     ]);
                 }
@@ -257,8 +257,20 @@ class BookingController extends Controller
                 ->whereIn('status', ['scheduled', 'in_progress'])
                 ->exists();
 
+            $otherActiveBooking = Booking::where('vehicle_id', $vehicle->id)
+                ->whereIn('status', ['pending', 'approved'])
+                ->exists();
+
+            if ($maintenanceInProgress) {
+                $vehicleStatus = 'inactive';
+            } elseif ($otherActiveBooking) {
+                $vehicleStatus = 'booked';
+            } else {
+                $vehicleStatus = 'active';
+            }
+
             $vehicle->update([
-                'status' => $maintenanceInProgress ? 'inactive' : 'active',
+                'status' => $vehicleStatus,
             ]);
 
             return $booking;
