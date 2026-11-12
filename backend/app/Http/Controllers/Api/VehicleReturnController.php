@@ -21,7 +21,7 @@ class VehicleReturnController extends Controller
         $validated = $request->validate([
             'actual_return_datetime' => ['required', 'date'],
             'odometer_end' => ['required', 'integer', 'min:0'],
-            'vehicle_condition' => ['required', 'string'],
+            'vehicle_condition' => ['required', 'in:baik,rusak_ringan,rusak_berat'],
             'return_notes' => ['nullable', 'string'],
         ]);
 
@@ -108,6 +108,10 @@ class VehicleReturnController extends Controller
                 'recorded_by' => $request->user()->id,
             ]);
 
+            $vehicle->update([
+                'condition_status' => $validated['vehicle_condition'],
+            ]);
+
             // Otomatis menyelesaikan booking setelah kendaraan dikembalikan.
             $booking->update([
                 'status' => 'completed',
@@ -121,13 +125,9 @@ class VehicleReturnController extends Controller
                 ->whereIn('status', ['pending', 'approved'])
                 ->exists();
 
-            $vehicleCondition = mb_strtolower(
-                trim($validated['vehicle_condition'])
-            );
-
             if (
                 $maintenanceInProgress ||
-                $vehicleCondition !== 'baik'
+                $vehicle->condition_status !== 'baik'
             ) {
                 $vehicleStatus = 'inactive';
             } elseif ($otherActiveBooking) {

@@ -261,7 +261,10 @@ class BookingController extends Controller
                 ->whereIn('status', ['pending', 'approved'])
                 ->exists();
 
-            if ($maintenanceInProgress) {
+            if (
+                $maintenanceInProgress ||
+                $vehicle->condition_status !== 'baik'
+            ) {
                 $vehicleStatus = 'inactive';
             } elseif ($otherActiveBooking) {
                 $vehicleStatus = 'booked';

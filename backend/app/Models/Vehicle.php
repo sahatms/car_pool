@@ -18,6 +18,7 @@ class Vehicle extends Model
         'registered_owner',
         'ownership_status',
         'status',
+        'condition_status',
         'photo',
     ];
 
