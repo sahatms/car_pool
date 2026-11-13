@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Vehicle;
 use App\Models\Booking;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -124,6 +125,54 @@ class VehicleController extends Controller
         return response()->json([
             'message' => 'Kendaraan berhasil diperbarui.',
             'data' => $vehicle->fresh(),
+        ]);
+    }
+
+    public function updateCondition(Request $request, string $id)
+    {
+        $validated = $request->validate([
+            'condition_status' => [
+                'required',
+                Rule::in(['baik', 'rusak_ringan', 'rusak_berat']),
+            ],
+        ]);
+
+        $vehicle = DB::transaction(function () use ($validated, $id) {
+            $vehicle = Vehicle::lockForUpdate()->findOrFail($id);
+
+            $vehicle->update([
+                'condition_status' => $validated['condition_status'],
+            ]);
+
+            $maintenanceInProgress = $vehicle->maintenances()
+                ->whereIn('status', ['scheduled', 'in_progress'])
+                ->exists();
+
+            $otherActiveBooking = Booking::where('vehicle_id', $vehicle->id)
+                ->whereIn('status', ['pending', 'approved'])
+                ->exists();
+
+            if (
+                $maintenanceInProgress ||
+                $vehicle->condition_status !== 'baik'
+            ) {
+                $vehicleStatus = 'inactive';
+            } elseif ($otherActiveBooking) {
+                $vehicleStatus = 'booked';
+            } else {
+                $vehicleStatus = 'active';
+            }
+
+            $vehicle->update([
+                'status' => $vehicleStatus,
+            ]);
+
+            return $vehicle->fresh();
+        });
+
+        return response()->json([
+            'message' => 'Kondisi kendaraan berhasil diperbarui.',
+            'data' => $vehicle,
         ]);
     }
 

@@ -82,10 +82,13 @@ class BookingController extends Controller
                     ->lockForUpdate()
                     ->firstOrFail();
 
-                if ($vehicle->status === 'inactive') {
+                if (
+                    $vehicle->status === 'inactive' ||
+                    $vehicle->condition_status !== 'baik'
+                ) {
                     throw ValidationException::withMessages([
                         'vehicle_id' => [
-                            'Kendaraan sedang tidak aktif dan tidak dapat dipinjam.',
+                            'Kendaraan sedang tidak aktif atau mengalami kerusakan dan tidak dapat dipinjam.',
                         ],
                     ]);
                 }

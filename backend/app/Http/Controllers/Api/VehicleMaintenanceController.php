@@ -140,7 +140,10 @@ class VehicleMaintenanceController extends Controller
                     ->whereIn('status', ['pending', 'approved'])
                     ->exists();
 
-                if ($hasActiveMaintenance) {
+                if (
+                    $hasActiveMaintenance ||
+                    $vehicle->condition_status !== 'baik'
+                ) {
                     $vehicleStatus = 'inactive';
                 } elseif ($hasActiveBooking) {
                     $vehicleStatus = 'booked';
@@ -319,7 +322,10 @@ class VehicleMaintenanceController extends Controller
                         ->whereIn('status', ['pending', 'approved'])
                         ->exists();
 
-                    if ($hasActiveMaintenance) {
+                    if (
+                        $hasActiveMaintenance ||
+                        $vehicle->condition_status !== 'baik'
+                    ) {
                         $vehicleStatus = 'inactive';
                     } elseif ($hasActiveBooking) {
                         $vehicleStatus = 'booked';
@@ -384,7 +390,10 @@ class VehicleMaintenanceController extends Controller
                 ->whereIn('status', ['pending', 'approved'])
                 ->exists();
 
-            if ($hasActiveMaintenance) {
+            if (
+                $hasActiveMaintenance ||
+                $vehicle->condition_status !== 'baik'
+            ) {
                 $vehicleStatus = 'inactive';
             } elseif ($hasActiveBooking) {
                 $vehicleStatus = 'booked';

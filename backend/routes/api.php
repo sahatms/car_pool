@@ -88,4 +88,9 @@ Route::middleware('auth:sanctum')->group(function () {
         '/fuel-transactions/{id}',
         [FuelTransactionController::class, 'destroy']
     );
+
+    Route::patch('/vehicles/{id}/condition', [
+        VehicleController::class,
+        'updateCondition'
+    ]);
 });
